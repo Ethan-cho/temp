@@ -1,116 +1,210 @@
-/*
-* sample_input.txt (main 코드 수정 TC = 30) : 19483229383 점
-* total_input.txt (main 코드 수정 TC = 105) : 68560964113 점
-* 
-1. device가 나중 추가되는게 새로 발견된 디바이스
-2. hash[A][B] , hashI[A] 를 활용 충돌 해결
-3. 일규님 아이디어 추가 1-> 마지막에 device별로 적절한 범위에 전체 스캔을 해서 분리된 그룹을 합침
-4. 일규님 아이디어 추가 2-> 아이디가 높을 수록 집합의 parent가 되도록함
-5. 파워가 너무 낮은 경우, 마지막에 추가된 녀석을 기준으로 뒤부터 처리
-*/
-#define ABS(x) (((x)<0)?(-(x)):(x))
-#define MIN(x,y) (((x)<(y))?((x)):(y))
-#define MAX(x,y) (((x)<(y))?((y)):(x))
-struct DetectedDevice {
+const int MAX_DEVICE = 256;
+const int MAX_ROOM = 52;
+
+struct DetectedDevice
+{
     int id;
     int power;
     int tx;
     int ty;
 };
-typedef struct Device {
+
+extern int scan_device(int mDeviceId, int mScanPower, DetectedDevice mDetected[]);
+
+#define ABS(x) (((x) > 0) ? (x) : -(x))
+
+// Device info
+struct Device {
     int id;
     int power;
-} Device;
-extern int scan_device(int mDeviceId, int mPower, DetectedDevice mDetected[]);
+};
 
-DetectedDevice mDetected[256];
-Device devices[256];
-int dI = 0;
-int parent[671133][2]; // 0 : real id, 1 : parent real id
+// Global variables
+static Device devices[MAX_DEVICE];
+static int deviceCount;
+static DetectedDevice detected[MAX_DEVICE];
 
-inline int getParentIndex(int id) {
-    int pI = id % 671133;
+// Union-Find with hash table
+static const int HASH_SIZE = 671133;
+static int hashId[HASH_SIZE];
+static int hashParent[HASH_SIZE];
+
+static int getHashIndex(int id) {
+    int idx = id % HASH_SIZE;
     while (true) {
-        if (parent[pI][0] == -1) return -1;
-        if (parent[pI][0] == id) return pI;
-        pI = (pI + 1) % 671133;
+        if (hashId[idx] == -1) return -1;
+        if (hashId[idx] == id) return idx;
+        idx = (idx + 1) % HASH_SIZE;
     }
 }
 
-int getParentId(int id) {
-    int pI = getParentIndex(id);
-    return parent[pI][1] == id ? id : getParentId(parent[pI][1]);
-}
+static int findParent(int id) {
+    int idx = getHashIndex(id);
+    if (idx == -1) return -1;
 
-bool createPa(int id) {
-    if (getParentIndex(id) == -1) {
-        int pI = id % 671133;
-        while (parent[pI][0] != -1) pI = (pI + 1) % 671133;
-        parent[pI][0] = id;
-        parent[pI][1] = id;
-
-        devices[dI].id = id;
-        devices[dI].power = 0;
-        dI++;
-        return false;
+    if (hashParent[idx] == id) {
+        return id;
     }
-    else return true;
+
+    return findParent(hashParent[idx]);
 }
 
-void unify(int id, int id2) {
-    int p1 = getParentId(id);
-    int p2 = getParentId(id2);
-    if (p2 > p1) {
-        parent[getParentIndex(p1)][1] = p2;
+static bool createDevice(int id) {
+    int idx = getHashIndex(id);
+    if (idx != -1) return true;
+
+    idx = id % HASH_SIZE;
+    while (hashId[idx] != -1) {
+        idx = (idx + 1) % HASH_SIZE;
+    }
+
+    hashId[idx] = id;
+    hashParent[idx] = id;
+
+    devices[deviceCount].id = id;
+    devices[deviceCount].power = 0;
+    deviceCount++;
+
+    return false;
+}
+
+static void unionDevices(int id1, int id2) {
+    int p1 = findParent(id1);
+    int p2 = findParent(id2);
+
+    if (p1 == p2) return;
+
+    if (p1 > p2) {
+        int idx = getHashIndex(p2);
+        hashParent[idx] = p1;
     } else {
-        parent[getParentIndex(p2)][1] = p1;
+        int idx = getHashIndex(p1);
+        hashParent[idx] = p2;
     }
 }
 
-bool isSameParent(int id, int id2) {
-    return getParentId(id) == getParentId(id2);
+static bool isSameParent(int id1, int id2) {
+    return findParent(id1) == findParent(id2);
 }
 
-Device& getNext() {
-    int minI = 0 , min = 1e9;
-    for (int i = dI - 1; i >= 0; i--) {
-        // 마지막에 추가된것 , 그리고 파워가 10이하로 세제곱 해도 별로 영향 없는것들
-        int score = (devices[i].power / 5) - (i == dI - 1 ? 15 : 0); -(devices[i].power <= 10 ? 5 : 0);
-        if (min > score) {
-            min = score;
-            minI = i;
+static Device* getNextDevice() {
+    int bestIdx = 0;
+    int bestScore = 1000000000;
+
+    for (int i = deviceCount - 1; i >= 0; i--) {
+        // Penalize high power devices more to reduce cost
+        int score = (devices[i].power / 2) - (i == deviceCount - 1 ? 25 : 0);
+
+        if (score < bestScore) {
+            bestScore = score;
+            bestIdx = i;
         }
     }
-    return devices[minI];
+
+    return &devices[bestIdx];
 }
 
+static void scanFromDevice(Device* device, int scanPower) {
+    int count = scan_device(device->id, scanPower, detected);
 
-void result(int mDeviceIds[][256]) {
-    int mDeviceIdsSize[52] = { 0, };
-    int indexToParent[52];
-    int iI = 0;
-    for (int i = 0; i < 52; i++) {
-        mDeviceIdsSize[i] = 0;
-        for (int j = 0; j < 256; j++)
+    for (int i = 0; i < count; i++) {
+        createDevice(detected[i].id);
+
+        int remainPower = ABS(scanPower - detected[i].power);
+        int manhattan = ABS(detected[i].tx) + ABS(detected[i].ty);
+
+        bool sameRoom = (manhattan == remainPower) && (detected[i].power > 1);
+
+        if (sameRoom) {
+            if (!isSameParent(detected[i].id, device->id)) {
+                unionDevices(detected[i].id, device->id);
+            }
+        }
+    }
+}
+
+void scan(int mDeviceId, int mTotalDevice)
+{
+    // Initialize
+    deviceCount = 0;
+    for (int i = 0; i < HASH_SIZE; i++) {
+        hashId[i] = -1;
+        hashParent[i] = -1;
+    }
+    for (int i = 0; i < MAX_DEVICE; i++) {
+        devices[i].id = -1;
+        devices[i].power = 0;
+    }
+
+    // Add first device
+    createDevice(mDeviceId);
+
+    // Phase 1: Discover all devices
+    while (deviceCount < mTotalDevice) {
+        Device* device = getNextDevice();
+        device->power++;
+        scanFromDevice(device, device->power);
+    }
+
+    // Phase 2: Merge separated groups
+    // Focus on parent devices for efficiency
+    for (int i = 0; i < deviceCount; i++) {
+        Device* device = &devices[i];
+        int parentId = findParent(device->id);
+
+        if (parentId == device->id) {
+            int targetPower = 173;
+            if (device->power < targetPower) {
+                scanFromDevice(device, targetPower);
+            }
+        } else if (device->power <=  5) {
+            // Only scan child devices with extremely low power
+            int targetPower = 113;
+            if (device->power < targetPower) {
+                scanFromDevice(device, targetPower);
+            }
+        }
+    }
+}
+
+void result(int mDeviceIds[][MAX_DEVICE])
+{
+    int roomCount = 0;
+    int roomParents[MAX_ROOM];
+    int roomSizes[MAX_ROOM];
+
+    for (int i = 0; i < MAX_ROOM; i++) {
+        roomSizes[i] = 0;
+        for (int j = 0; j < MAX_DEVICE; j++) {
             mDeviceIds[i][j] = -1;
-    }
-
-    for (int i = 0; i < dI; i++) {
-        int id = devices[i].id;
-        int parentId = getParentId(id);
-        int j = 0;
-        for (j; j < iI; j++) {
-            if (indexToParent[j] == parentId) break;
         }
-        if (j == iI)
-            indexToParent[iI++] = parentId;
-
-        mDeviceIds[j][mDeviceIdsSize[j]++] = id;
     }
 
-    for (int i = 0; i < iI; i++) {
-        for (int j = 0; j < mDeviceIdsSize[i] - 1; j++) {
-            for (int k = j + 1; k < mDeviceIdsSize[i]; k++) {
+    for (int i = 0; i < deviceCount; i++) {
+        int deviceId = devices[i].id;
+        int parentId = findParent(deviceId);
+
+        int roomIdx = -1;
+        for (int j = 0; j < roomCount; j++) {
+            if (roomParents[j] == parentId) {
+                roomIdx = j;
+                break;
+            }
+        }
+
+        if (roomIdx == -1) {
+            roomIdx = roomCount;
+            roomParents[roomCount] = parentId;
+            roomCount++;
+        }
+
+        mDeviceIds[roomIdx][roomSizes[roomIdx]++] = deviceId;
+    }
+
+    // Sort devices within each room
+    for (int i = 0; i < roomCount; i++) {
+        for (int j = 0; j < roomSizes[i] - 1; j++) {
+            for (int k = j + 1; k < roomSizes[i]; k++) {
                 if (mDeviceIds[i][j] > mDeviceIds[i][k]) {
                     int temp = mDeviceIds[i][j];
                     mDeviceIds[i][j] = mDeviceIds[i][k];
@@ -120,56 +214,16 @@ void result(int mDeviceIds[][256]) {
         }
     }
 
-    for (int i = 0; i < iI - 1; i++) {
-        for (int j = i; j < iI; j++) {
+    // Sort rooms by first device ID
+    for (int i = 0; i < roomCount - 1; i++) {
+        for (int j = i + 1; j < roomCount; j++) {
             if (mDeviceIds[i][0] > mDeviceIds[j][0]) {
-                for (int t = 0; t < 256; t++) {
-                    int temp = mDeviceIds[i][t];
-                    mDeviceIds[i][t] = mDeviceIds[j][t];
-                    mDeviceIds[j][t] = temp;
+                for (int k = 0; k < MAX_DEVICE; k++) {
+                    int temp = mDeviceIds[i][k];
+                    mDeviceIds[i][k] = mDeviceIds[j][k];
+                    mDeviceIds[j][k] = temp;
                 }
             }
         }
     }
-}
-
-void scanByDevice(Device& device, int power) {
-    int count = scan_device(device.id, power, mDetected);
-    for (int i = 0; i < count; i++) {
-        createPa(mDetected[i].id);
-        int remainPower = ABS(power - mDetected[i].power);
-        bool isSameRoom = ABS(mDetected[i].tx) + ABS(mDetected[i].ty) == remainPower && mDetected[i].power > 1;
-        if (isSameRoom) {
-            if (!isSameParent(mDetected[i].id, device.id)) {
-                unify(mDetected[i].id, device.id);
-            }
-        }
-    }
-}
-
-void scan(int mDeviceId, int mDeviceNum) {
-    dI = 0;
-    for (int i = 0; i < 671133; i++) parent[i][0] = -1, parent[i][1] = -1;
-    for (int i = 0; i < 256; i++) devices[i].id = -1, devices[i].power = 0;
-    createPa(mDeviceId);
-    while (dI != mDeviceNum) {
-        Device& device = getNext();
-        int power = ++device.power;
-        scanByDevice(device, power);
-    }
-
-    for (int i = 0; i < dI; i++) {
-        Device& device = devices[i];
-        if (getParentId(devices[i].id) == devices[i].id) {
-            int p = 196;
-            if (devices[i].power < p)
-                scanByDevice(device, p);
-        }
-        else {
-            int p = 137;
-            if (devices[i].power < p)
-                scanByDevice(device, p);
-        }
-    }
-    return;
 }
