@@ -11,7 +11,7 @@
 #define ABS(x) (((x)<0)?(-(x)):(x))
 #define MIN(x,y) (((x)<(y))?((x)):(y))
 #define MAX(x,y) (((x)<(y))?((y)):(x))
-struct Detected {
+struct DetectedDevice {
     int id;
     int power;
     int tx;
@@ -21,9 +21,9 @@ typedef struct Device {
     int id;
     int power;
 } Device;
-extern int scan_device(int mDeviceId, int mPower, struct Detected mDetected[]);
+extern int scan_device(int mDeviceId, int mPower, DetectedDevice mDetected[]);
 
-Detected mDetected[256];
+DetectedDevice mDetected[256];
 Device devices[256];
 int dI = 0;
 int parent[671133][2]; // 0 : real id, 1 : parent real id
